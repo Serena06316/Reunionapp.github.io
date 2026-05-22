@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN" data-theme="dark">
 <head>
 <link rel="manifest" href="manifest.json">
@@ -542,8 +542,173 @@ let S={theme:'dark',sOn:false,tOn:false,cfg:{base:'',key:'',models:[],cur:'',tok
 let busy=false,ctrl=null,pf=[],tmpA={u:'',a:''};
 let editingWB=null;
 
-function load(){try{const d=localStorage.getItem('reunion');if(d){const p=JSON.parse(d);Object.assign(S,p);if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:''};if(!S.cfg.gWB)S.cfg.gWB=[];if(!S.cfg.searchBase)S.cfg.searchBase='';if(!S.cfg.searchKey)S.cfg.searchKey='';if(!S.cfg.visionBase)S.cfg.visionBase='';if(!S.cfg.visionKey)S.cfg.visionKey='';if(!S.cfg.visionModel)S.cfg.visionModel='';if(!S.mem)S.mem=[];if(!S.chats)S.chats={};if(!S.anni)S.anni=[];if(S.css===undefined)S.css='';if(!S.presets)S.presets=[];if(!S.worldBooks)S.worldBooks=[];if(!S.notes)S.notes=[];if(!S.letters)S.letters=[];if(S.letRead===undefined)S.letRead=0;Object.values(S.chats).forEach(c=>{if(!c.lWB)c.lWB=[];(c.msgs||[]).forEach((m,i)=>{if(!m.id)m.id='m'+i+'_'+rnd();if(!m.ts)m.ts=c.ts||Date.now()})})}}catch(e){}}
-function sv(){try{localStorage.setItem('reunion',JSON.stringify(S))}catch(e){}}
+/* ===== IndexedDB Storage Layer ===== */
+const DB_NAME='ReunionDB';
+const DB_VER=1;
+let db=null;
+
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('chats'))d.createObjectStore('chats',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('memories'))d.createObjectStore('memories',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('notes'))d.createObjectStore('notes',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('letters'))d.createObjectStore('letters',{keyPath:'id'});
+    };
+    req.onsuccess=e=>{resolve(e.target.result)};
+    req.onerror=e=>{reject(e.target.error)};
+  });
+}
+
+function dbGetAll(store){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(store,'readonly');
+    const s=tx.objectStore(store);
+    const req=s.getAll();
+    req.onsuccess=()=>resolve(req.result||[]);
+    req.onerror=()=>reject(req.error);
+  });
+}
+
+function svConfig(){
+  const config={theme:S.theme,sOn:S.sOn,tOn:S.tOn,cfg:S.cfg,cid:S.cid,anni:S.anni,css:S.css,presets:S.presets,worldBooks:S.worldBooks,letRead:S.letRead};
+  try{localStorage.setItem('reunion_config',JSON.stringify(config))}catch(e){}
+}
+
+let _svTimer=null;
+function sv(){
+  svConfig();
+  if(_svTimer)clearTimeout(_svTimer);
+  _svTimer=setTimeout(svDB,200);
+}
+
+async function svDB(){
+  if(!db)return;
+  try{
+    const tx=db.transaction(['chats','memories','notes','letters'],'readwrite');
+    const cs=tx.objectStore('chats');
+    cs.clear();
+    Object.values(S.chats).forEach(c=>cs.put(c));
+    const ms=tx.objectStore('memories');
+    ms.clear();
+    S.mem.forEach(m=>ms.put(m));
+    const ns=tx.objectStore('notes');
+    ns.clear();
+    S.notes.forEach(n=>ns.put(n));
+    const ls=tx.objectStore('letters');
+    ls.clear();
+    S.letters.forEach(l=>ls.put(l));
+    await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});
+  }catch(e){console.warn('IndexedDB write error:',e)}
+}
+
+function fixupData(){
+  if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:''};
+  if(!S.cfg.gWB)S.cfg.gWB=[];
+  if(!S.cfg.searchBase)S.cfg.searchBase='';
+  if(!S.cfg.searchKey)S.cfg.searchKey='';
+  if(!S.cfg.visionBase)S.cfg.visionBase='';
+  if(!S.cfg.visionKey)S.cfg.visionKey='';
+  if(!S.cfg.visionModel)S.cfg.visionModel='';
+  if(!S.mem)S.mem=[];
+  if(!S.chats)S.chats={};
+  if(!S.anni)S.anni=[];
+  if(S.css===undefined)S.css='';
+  if(!S.presets)S.presets=[];
+  if(!S.worldBooks)S.worldBooks=[];
+  if(!S.notes)S.notes=[];
+  if(!S.letters)S.letters=[];
+  if(S.letRead===undefined)S.letRead=0;
+  Object.entries(S.chats).forEach(([key,c])=>{
+    if(!c.id)c.id=key;
+    if(!c.lWB)c.lWB=[];
+    (c.msgs||[]).forEach((m,i)=>{if(!m.id)m.id='m'+i+'_'+rnd();if(!m.ts)m.ts=c.ts||Date.now()})
+  });
+  S.mem.forEach((m,i)=>{if(m.id===undefined||m.id===null)m.id=Date.now()+i+Math.random()});
+  S.notes.forEach((n,i)=>{if(n.id===undefined||n.id===null)n.id=Date.now()+i+Math.random()});
+  S.letters.forEach((l,i)=>{if(l.id===undefined||l.id===null)l.id=Date.now()+i+Math.random()});
+}
+
+async function load(){
+  try{
+    db=await openDB();
+  }catch(e){
+    console.warn('IndexedDB unavailable, using localStorage fallback:',e);
+    db=null;
+    loadLegacy();
+    return;
+  }
+
+  // Check for data in new format (reunion_config in localStorage)
+  let configStr=null;
+  try{configStr=localStorage.getItem('reunion_config')}catch(e){}
+
+  // Check if IndexedDB has any chats
+  let idbChats=[];
+  try{idbChats=await dbGetAll('chats')}catch(e){}
+
+  if(configStr||idbChats.length>0){
+    // Load from new format
+    if(configStr){
+      try{
+        const config=JSON.parse(configStr);
+        S.theme=config.theme||'dark';
+        S.sOn=config.sOn||false;
+        S.tOn=config.tOn||false;
+        S.cfg=config.cfg||S.cfg;
+        S.cid=config.cid||null;
+        S.anni=config.anni||[];
+        S.css=config.css||'';
+        S.presets=config.presets||[];
+        S.worldBooks=config.worldBooks||[];
+        S.letRead=config.letRead||0;
+      }catch(e){}
+    }
+    S.chats={};
+    idbChats.forEach(c=>{S.chats[c.id]=c});
+    try{S.mem=await dbGetAll('memories')}catch(e){S.mem=[]}
+    try{S.notes=await dbGetAll('notes')}catch(e){S.notes=[]}
+    try{S.letters=await dbGetAll('letters')}catch(e){S.letters=[]}
+    fixupData();
+  }else{
+    // Try legacy localStorage migration
+    let legacy=null;
+    try{const d=localStorage.getItem('reunion');if(d)legacy=JSON.parse(d)}catch(e){}
+    if(legacy){
+      Object.assign(S,legacy);
+      fixupData();
+      // Migrate to new format
+      svConfig();
+      await svDB();
+      // Remove legacy key to free space
+      try{localStorage.removeItem('reunion')}catch(e){}
+      console.log('Migrated from localStorage to IndexedDB');
+    }else{
+      fixupData();
+    }
+  }
+}
+
+function loadLegacy(){
+  // Pure localStorage fallback when IndexedDB is unavailable
+  try{
+    const d=localStorage.getItem('reunion_config');
+    if(d){
+      const config=JSON.parse(d);
+      S.theme=config.theme||'dark';S.sOn=config.sOn||false;S.tOn=config.tOn||false;
+      S.cfg=config.cfg||S.cfg;S.cid=config.cid||null;S.anni=config.anni||[];
+      S.css=config.css||'';S.presets=config.presets||[];S.worldBooks=config.worldBooks||[];S.letRead=config.letRead||0;
+    }else{
+      const d2=localStorage.getItem('reunion');
+      if(d2){const p=JSON.parse(d2);Object.assign(S,p)}
+    }
+  }catch(e){}
+  fixupData();
+}
+/* ===== End IndexedDB Storage Layer ===== */
+
 function rnd(){return Math.random().toString(36).slice(2,8)}
 function uid(){return Date.now().toString(36)+rnd()}
 function fmtDate(ts){if(!ts)return'';const d=new Date(ts);return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')}
@@ -745,8 +910,10 @@ function saveS(){
   S.css=Q('#i_css').value;applyCSS();sv();closeS();rM();toast('已保存')}
 Q('#sBg').addEventListener('click',e=>{if(e.target.id==='sBg')closeS()});
 
-function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='reunion_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('已导出')}
-function importData(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const d=JSON.parse(e.target.result);if(d.chats||d.mem||d.cfg){Object.assign(S,d);sv();applyTheme();applyCSS();rL();rM();rMem();uMB();uLetB();uT();toast('已导入')}}catch(err){toast('格式错误')}};r.readAsText(f);ev.target.value=''}
+function exportData(){
+  const full={theme:S.theme,sOn:S.sOn,tOn:S.tOn,cfg:S.cfg,mem:S.mem,chats:S.chats,cid:S.cid,anni:S.anni,css:S.css,presets:S.presets,worldBooks:S.worldBooks,notes:S.notes,letters:S.letters,letRead:S.letRead};
+  const b=new Blob([JSON.stringify(full,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='reunion_'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);toast('已导出')}
+function importData(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=async e=>{try{const d=JSON.parse(e.target.result);if(d.chats||d.mem||d.cfg){Object.assign(S,d);fixupData();sv();await svDB();applyTheme();applyCSS();rL();rM();rMem();uMB();uLetB();uT();toast('已导入')}}catch(err){toast('格式错误')}};r.readAsText(f);ev.target.value=''}
 
 /* ===== Search API ===== */
 async function searchWeb(q){
@@ -822,7 +989,6 @@ async function doSend(isRe){
     c.msgs.push({id:'m_'+uid(),role:'user',content,rawText:txt,files,ts:Date.now()});pf=[];inp.value='';inp.style.height='';rF();if(c.title==='新对话'&&txt){c.title=txt.slice(0,24)+(txt.length>24?'…':'');uT();rL()}}
   const last=c.msgs[c.msgs.length-1];if(!last||last.role!=='user')return;
 
-  // 检查是否有图片需要识图
   const imgFiles=(last.files||[]).filter(f=>f.img&&f.data);
   let visionDesc=null;
   let usedVision=false;
@@ -850,16 +1016,13 @@ async function doSend(isRe){
   if(S.tOn)sys+='\n\n[思考模式] 请先用 <think>...</think> 深入思考，然后给出正式回复。';
   api.push({role:'system',content:sys});
 
-  // 构建历史消息
   c.msgs.forEach(m=>{
     if(m.role==='user'&&m.files&&m.files.some(f=>f.img&&f.data)){
-      // 如果没有配置独立识图API，则用多模态格式直接发图给主模型
       if(!S.cfg.visionBase||!S.cfg.visionKey||!S.cfg.visionModel){
         const parts=[];parts.push({type:'text',text:m.content});
         m.files.forEach(f=>{if(f.img&&f.data)parts.push({type:'image_url',image_url:{url:f.data,detail:'auto'}})});
         api.push({role:'user',content:parts});
       } else {
-        // 有独立识图API，图片已由vision处理，纯文本发给主模型
         api.push({role:m.role,content:m.content});
       }
     } else {
@@ -867,7 +1030,6 @@ async function doSend(isRe){
     }
   });
 
-  // 如果识图API返回了描述，注入到上下文
   if(visionDesc){
     api.push({role:'system',content:'[识图结果 - 以下是图片内容的详细描述：]\n'+visionDesc+'\n\n请基于以上图片描述回答用户的问题。'});
   }
@@ -891,7 +1053,6 @@ async function doSend(isRe){
           sUpd(aM)}catch(e){}}}
       return full};
     let fullResult=await runStream();
-    // get_stats 工具
     const allFirst=aM.content+(aM.thinking?'\n'+aM.thinking:'');
     if(/<get_stats\s*\/?>/.test(allFirst)||/<get_stats>\s*<\/get_stats>/.test(allFirst)){
       aM.statsUsed=true;const statsText=getFullStats();
@@ -981,8 +1142,9 @@ function uSnd(){const b=Q('#sendBtn');if(busy){b.innerHTML='<i class="fas fa-sto
 
 Q('#uIn').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,260)+'px'});
 
-function init(){
-  load();applyTheme();applyCSS();
+async function init(){
+  await load();
+  applyTheme();applyCSS();
   if(!Object.keys(S.chats).length)newChat();else{rL();rM();rF();uT()}
   rMem();uMB();uLetB();rTags();
   Q('#dotS').classList.toggle('on',S.sOn);Q('#dotT').classList.toggle('on',S.tOn)}
@@ -990,4 +1152,5 @@ init();
 </script>
 </body>
 </html>
+
 
