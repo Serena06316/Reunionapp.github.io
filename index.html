@@ -1022,7 +1022,7 @@ function greeting(){
 function onSendClick(){if(busy){if(ctrl)ctrl.abort();return}doSend(false)}
 
 /* ===== STT (语音转文字) ===== */
-let recognition=null,isRecording=false,currentTranscript='',silenceTimer=null;
+let recognition=null,isRecording=false,currentTranscript='',silenceTimer=null,restartCount=0;
 function resetSilenceTimer(){
   if(silenceTimer)clearTimeout(silenceTimer);
   // 15秒内没有继续说话，就自动发送
@@ -1033,7 +1033,8 @@ function initRec(){
   if(!SR)return null;
   const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
   r.onresult=e=>{
-    // 只要识别到声音，就重置 15 秒倒计时
+    // 只要识别到声音，就重置 15 秒倒计时和重连计数
+    restartCount=0;
     resetSilenceTimer();
     for(let i=e.resultIndex;i<e.results.length;i++){
       const t=e.results[i][0].transcript;
@@ -1047,21 +1048,33 @@ function initRec(){
     if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
       toast('麦克风权限被拒绝或被系统拦截');
       stopMic(false); // 权限被拒不发送
-    } else if (e.error === 'no-speech') {
-      // 没说话，忽略，让 15 秒倒计时自己处理
+    } else if (e.error === 'no-speech' || e.error === 'aborted') {
+      // 没说话或被中止，静默处理
     } else {
-      toast('语音识别出错: ' + e.error);
+      // network 等其他错误（经常因为网络波动），静默处理，让 onend 去重连
+      restartCount++;
+      if(restartCount > 3) {
+        toast('网络似乎有些不稳定，正在努力重连...');
+      }
     }
   };
   r.onend=()=>{
     if(isRecording){
-      // 【关键修改】引擎自己停了（通常是停顿导致的），我们偷偷重启它，不让它发送！
-      // 这样就能保证必须等够 15 秒没声音才真正发送。
-      try {
-        recognition.start();
-      } catch(e) {
-        console.warn('录音引擎重启中...', e);
-      }
+      // 延迟 300ms 重启，避免状态冲突导致重启失败（这是导致文字截断的罪魁祸首）
+      setTimeout(() => {
+        if(isRecording){
+          try {
+            recognition.start();
+          } catch(err) {
+            console.warn('录音引擎重启失败:', err);
+            restartCount++;
+            if(restartCount > 5) {
+              toast('网络持续断开，已自动保存当前内容');
+              stopMic(true); // 实在连不上，结束录音并发送已有的部分
+            }
+          }
+        }
+      }, 300);
     }
   };
   return r;
@@ -1075,7 +1088,7 @@ function toggleMic(){
   else{
     if(!recognition)recognition=initRec();
     if(!recognition){toast('当前浏览器不支持语音输入');return}
-    isRecording=true;currentTranscript='';
+    isRecording=true;currentTranscript='';restartCount=0;
     try{
       recognition.start();
       Q('#micBtn').classList.add('recording');
