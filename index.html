@@ -1022,28 +1022,71 @@ function greeting(){
 function onSendClick(){if(busy){if(ctrl)ctrl.abort();return}doSend(false)}
 
 /* ===== STT (语音转文字) ===== */
-let recognition=null,isRecording=false,micTimeout=null,currentTranscript='';
+/* ===== STT (语音转文字) ===== */
+let recognition=null,isRecording=false,currentTranscript='',silenceTimer=null;
+function resetSilenceTimer(){
+  if(silenceTimer)clearTimeout(silenceTimer);
+  // 15秒内没有继续说话，就自动发送
+  silenceTimer=setTimeout(()=>{if(isRecording)stopMic(true)},15000);
+}
 function initRec(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return null;
   const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
-  r.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)currentTranscript+=t;else interim+=t}};
-  r.onerror=e=>{stopMic(true)};
-  r.onend=()=>{if(isRecording)stopMic(true)};
+  r.onresult=e=>{
+    // 只要识别到声音（不管是临时还是最终结果），就重置 15 秒倒计时
+    resetSilenceTimer();
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const t=e.results[i][0].transcript;
+      if(e.results[i].isFinal){
+        currentTranscript+=t;
+      }
+    }
+  };
+  r.onerror=e=>{
+    console.error('语音识别错误:', e.error);
+    if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+      toast('麦克风权限被拒绝或被系统拦截');
+    } else if (e.error === 'no-speech') {
+      toast('没有听到声音，请重试');
+    } else {
+      toast('语音识别出错: ' + e.error);
+    }
+    if(silenceTimer)clearTimeout(silenceTimer);
+    stopMic(true)
+  };
+  r.onend=()=>{
+    // 如果浏览器引擎自己停止了（通常是很长时间没声音），也直接发送
+    if(isRecording){
+      if(silenceTimer)clearTimeout(silenceTimer);
+      stopMic(true);
+    }
+  };
   return r;
 }
 function toggleMic(){
-  if(isRecording){stopMic(true)}
+  if(isRecording){
+    // 手动点击停止，立即发送
+    if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null}
+    stopMic(true)
+  }
   else{
     if(!recognition)recognition=initRec();
     if(!recognition){toast('当前浏览器不支持语音输入');return}
     isRecording=true;currentTranscript='';
-    try{recognition.start();Q('#micBtn').classList.add('recording');Q('#micBtn').innerHTML='<i class="fas fa-stop"></i>';micTimeout=setTimeout(()=>stopMic(true),15000)}catch(e){toast('启动失败，请重试')}
+    try{
+      recognition.start();
+      Q('#micBtn').classList.add('recording');
+      Q('#micBtn').innerHTML='<i class="fas fa-stop"></i>';
+      // 开始录音时，启动第一次 15 秒倒计时
+      resetSilenceTimer();
+    }catch(e){toast('启动失败，请重试')}
   }
 }
 function stopMic(send=false){
   if(!isRecording)return;
-  isRecording=false;clearTimeout(micTimeout);
+  isRecording=false;
+  if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null}
   try{recognition.stop()}catch(e){}
   Q('#micBtn').classList.remove('recording');Q('#micBtn').innerHTML='<i class="fas fa-microphone"></i>';
   if(send&&currentTranscript.trim()){doSend(false,currentTranscript.trim(),true)}
