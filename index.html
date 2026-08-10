@@ -126,6 +126,8 @@ input,textarea,select,button{font-family:inherit}
 .m-file img{width:28px;height:28px;object-fit:cover;border-radius:4px}
 .m-acts{display:flex;gap:3px;margin-top:3px;opacity:0;transition:opacity .12s}
 .message:hover .m-acts,.message:active .m-acts{opacity:1}
+.message.failed .m-acts, .m-acts.force-show{opacity:1 !important; display:flex !important; pointer-events:auto !important;}
+.message.failed .m-text{border:1px dashed var(--red);border-radius:8px;padding:8px}
 .ma{padding:3px 8px;font-size:10px;border:none;border-radius:5px;background:var(--acs);color:var(--t3);cursor:pointer;display:inline-flex;align-items:center;gap:3px;transition:all .12s}
 .ma:hover{background:var(--sf1);color:var(--t1)}
 .ma.rd:hover{color:var(--red);background:rgba(240,96,104,.06)}
@@ -289,7 +291,7 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
 .cal-scroll{flex:1;overflow-y:auto;padding:0 18px;min-height:0}
 .cal-mo{margin-bottom:20px}
 .cal-mo-t{font-size:13px;font-weight:600;color:var(--t1);text-align:center;margin-bottom:2px;position:sticky;top:0;background:var(--bg1);padding:6px 0;z-index:1}
-.cal-mg{display:grid;grid-template-columns:repeat(7,26px);gap:3px;justify-content:center}
+.cal-mg{display:grid;grid-template-columns:repeat(7,26px);grid-auto-rows:26px;gap:3px;justify-content:center;align-content:start;align-items:start}
 .cal-mhd{width:26px;height:16px;font-size:9px;color:var(--t4);display:flex;align-items:center;justify-content:center;font-weight:600}
 .cal-mc{width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--t3);cursor:default;transition:background .15s}
 .cal-mc.empty{background:transparent}
@@ -641,16 +643,13 @@ async function load(){
     return;
   }
 
-  // Check for data in new format (reunion_config in localStorage)
   let configStr=null;
   try{configStr=localStorage.getItem('reunion_config')}catch(e){}
 
-  // Check if IndexedDB has any chats
   let idbChats=[];
   try{idbChats=await dbGetAll('chats')}catch(e){}
 
   if(configStr||idbChats.length>0){
-    // Load from new format
     if(configStr){
       try{
         const config=JSON.parse(configStr);
@@ -673,16 +672,13 @@ async function load(){
     try{S.letters=await dbGetAll('letters')}catch(e){S.letters=[]}
     fixupData();
   }else{
-    // Try legacy localStorage migration
     let legacy=null;
     try{const d=localStorage.getItem('reunion');if(d)legacy=JSON.parse(d)}catch(e){}
     if(legacy){
       Object.assign(S,legacy);
       fixupData();
-      // Migrate to new format
       svConfig();
       await svDB();
-      // Remove legacy key to free space
       try{localStorage.removeItem('reunion')}catch(e){}
       console.log('Migrated from localStorage to IndexedDB');
     }else{
@@ -692,7 +688,6 @@ async function load(){
 }
 
 function loadLegacy(){
-  // Pure localStorage fallback when IndexedDB is unavailable
   try{
     const d=localStorage.getItem('reunion_config');
     if(d){
@@ -1042,6 +1037,7 @@ async function doSend(isRe){
 
   const aM={id:'m_'+uid(),role:'assistant',content:'',thinking:'',model:S.cfg.cur,searched:didS,memSaved:false,letSaved:false,styleSaved:false,statsUsed:false,visionUsed:usedVision,ts:Date.now()};c.msgs.push(aM);sv();rM();
   busy=true;ctrl=new AbortController();uSnd();
+  const timeoutId = setTimeout(() => { if(busy && ctrl) ctrl.abort(); }, 300000);
   try{
     const runStream=async()=>{
       const res=await sApi(api,ctrl.signal);if(!res.ok)throw new Error('API '+res.status+': '+(await res.text()).slice(0,200));
@@ -1078,8 +1074,22 @@ async function doSend(isRe){
     if(lls.length){lls.forEach(l=>addLetter('assistant',l));aM.letSaved=true}
     if(styleChanged){applyCSS();aM.styleSaved=true}
     sv();rMem();uMB();uLetB();rM();
-  }catch(e){if(e.name!=='AbortError'){aM.content='请求失败：'+e.message;rM()}}
-  finally{busy=false;ctrl=null;uSnd();sv()}}
+  }catch(e){
+    if(e.name!=='AbortError'){
+      let errMsg = e.message || '未知错误';
+      if(errMsg.includes('504')) errMsg = 'API 504 网关超时';
+      else if(errMsg.includes('502')) errMsg = 'API 502 网关错误';
+      else errMsg = errMsg.slice(0, 100);
+      aM.content='请求失败：' + errMsg + '\n\n[请点击下方“删除”或“重新生成”按钮]';
+    } else if(!aM.content){
+      aM.content='请求超时或被中止，请删除本条重试。';
+    }
+    rM();
+  }
+  finally{
+    clearTimeout(timeoutId);
+    busy=false;ctrl=null;uSnd();sv();
+  }}
 
 function rL(){
   const el=Q('#chatList');const sorted=Object.values(S.chats).sort((a,b)=>b.ts-a.ts);
@@ -1095,6 +1105,7 @@ function getDisplayText(m){if(m.rawText!==undefined)return m.rawText;let d=m.con
 
 function bMsg(m){
   const isU=m.role==='user';
+  const isFailed = !isU && m.content && (m.content.startsWith('请求失败') || m.content.startsWith('请求超时'));
   const av=isU?(S.cfg.uA?`<img src="${S.cfg.uA}">`:'<i class="fas fa-user"></i>'):(S.cfg.aA?`<img src="${S.cfg.aA}">`:'<i class="fas fa-robot"></i>');
   const name=isU?(S.cfg.uN||'用户'):(S.cfg.aN||'助手');
   const model=(!isU&&m.model)?`<span class="m-model">${esc(m.model)}</span>`:'';
@@ -1106,17 +1117,19 @@ function bMsg(m){
     if(m.statsUsed)body+='<div class="bdg-stats"><i class="fas fa-chart-line"></i> 已获取陪伴统计</div>';
     if(m.searched)body+='<div class="bdg-s"><i class="fas fa-globe"></i> 已联网搜索</div>';
     if(m.thinking)body+=`<div class="think"><div class="think-h on" onclick="this.classList.toggle('on');this.nextElementSibling.classList.toggle('on')"><i class="fas fa-caret-right ar"></i> 思考过程</div><div class="think-b on">${esc(m.thinking)}</div></div>`;
-    if(m.content){try{body+=marked.parse(m.content)}catch(e){body+=esc(m.content)}}
+    if(isFailed){
+      body+=`<div style="color:var(--red);white-space:pre-wrap;word-break:break-word;">${esc(m.content)}</div>`;
+    } else if(m.content){try{body+=marked.parse(m.content)}catch(e){body+=esc(m.content)}}
     else if(busy&&m===cc().msgs[cc().msgs.length-1])body+=`<div class="gen"><div class="gd"><span></span><span></span><span></span></div>正在生成…</div>`;
     if(m.memSaved)body+='<div class="bdg-m"><i class="fas fa-check-circle"></i> 记忆已更新</div>';
     if(m.letSaved)body+='<div class="bdg-let"><i class="fas fa-envelope"></i> 已写入信箱</div>';
     if(m.styleSaved)body+='<div class="bdg-style"><i class="fas fa-palette"></i> 美化已更新</div>'}
   let acts='';
   if(isU)acts=`<div class="m-acts"><button class="ma" onclick="startEdit('${m.id}')"><i class="fas fa-pen"></i> 编辑</button><button class="ma rd" onclick="delMsg('${m.id}')"><i class="fas fa-trash"></i> 删除</button></div>`;
-  else acts=`<div class="m-acts"><button class="ma" onclick="regen('${m.id}')"><i class="fas fa-rotate"></i> 重新生成</button><button class="ma" onclick="startEdit('${m.id}')"><i class="fas fa-pen"></i> 编辑</button><button class="ma rd" onclick="delMsg('${m.id}')"><i class="fas fa-trash"></i> 删除</button></div>`;
+  else acts=`<div class="m-acts ${isFailed?'force-show':''}"><button class="ma" onclick="regen('${m.id}')"><i class="fas fa-rotate"></i> 重新生成</button><button class="ma" onclick="startEdit('${m.id}')"><i class="fas fa-pen"></i> 编辑</button><button class="ma rd" onclick="delMsg('${m.id}')"><i class="fas fa-trash"></i> 删除</button></div>`;
   const editVal=isU?getDisplayText(m):(m.content||'');
   const eb=`<div class="ebox" id="eb_${m.id}"><textarea>${esc(editVal)}</textarea><div class="ebox-b"><button class="eb-no" onclick="cancelEdit('${m.id}')">取消</button><button class="eb-ok" onclick="saveEdit('${m.id}')">保存</button></div></div>`;
-  return`<div class="message ${isU?'u':'a'}" data-id="${m.id}"><div class="msg-row"><div class="m-av ${isU?'uav':'aav'}">${av}</div><div class="m-body"><div class="m-head"><span class="m-name">${esc(name)}</span>${model}<span class="m-time">${time}</span></div><div class="m-text">${body}</div>${acts}${eb}</div></div></div>`}
+  return`<div class="message ${isU?'u':'a'} ${isFailed?'failed':''}" data-id="${m.id}"><div class="msg-row"><div class="m-av ${isU?'uav':'aav'}">${av}</div><div class="m-body"><div class="m-head"><span class="m-name">${esc(name)}</span>${model}<span class="m-time">${time}</span></div><div class="m-text">${body}</div>${acts}${eb}</div></div></div>`}
 
 function sUpd(m){
   const el=document.querySelector(`.message[data-id="${m.id}"] .m-text`);if(!el)return;let h='';
@@ -1152,5 +1165,3 @@ init();
 </script>
 </body>
 </html>
-
-
