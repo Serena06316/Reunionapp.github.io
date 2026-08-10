@@ -1022,7 +1022,6 @@ function greeting(){
 function onSendClick(){if(busy){if(ctrl)ctrl.abort();return}doSend(false)}
 
 /* ===== STT (语音转文字) ===== */
-/* ===== STT (语音转文字) ===== */
 let recognition=null,isRecording=false,currentTranscript='',silenceTimer=null;
 function resetSilenceTimer(){
   if(silenceTimer)clearTimeout(silenceTimer);
@@ -1034,7 +1033,7 @@ function initRec(){
   if(!SR)return null;
   const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
   r.onresult=e=>{
-    // 只要识别到声音（不管是临时还是最终结果），就重置 15 秒倒计时
+    // 只要识别到声音，就重置 15 秒倒计时
     resetSilenceTimer();
     for(let i=e.resultIndex;i<e.results.length;i++){
       const t=e.results[i][0].transcript;
@@ -1047,26 +1046,29 @@ function initRec(){
     console.error('语音识别错误:', e.error);
     if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
       toast('麦克风权限被拒绝或被系统拦截');
+      stopMic(false); // 权限被拒不发送
     } else if (e.error === 'no-speech') {
-      toast('没有听到声音，请重试');
+      // 没说话，忽略，让 15 秒倒计时自己处理
     } else {
       toast('语音识别出错: ' + e.error);
     }
-    if(silenceTimer)clearTimeout(silenceTimer);
-    stopMic(true)
   };
   r.onend=()=>{
-    // 如果浏览器引擎自己停止了（通常是很长时间没声音），也直接发送
     if(isRecording){
-      if(silenceTimer)clearTimeout(silenceTimer);
-      stopMic(true);
+      // 【关键修改】引擎自己停了（通常是停顿导致的），我们偷偷重启它，不让它发送！
+      // 这样就能保证必须等够 15 秒没声音才真正发送。
+      try {
+        recognition.start();
+      } catch(e) {
+        console.warn('录音引擎重启中...', e);
+      }
     }
   };
   return r;
 }
 function toggleMic(){
   if(isRecording){
-    // 手动点击停止，立即发送
+    // 手动点击停止，清除倒计时，立即发送
     if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null}
     stopMic(true)
   }
