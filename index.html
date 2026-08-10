@@ -2,7 +2,6 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <link rel="manifest" href="manifest.json">
-<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js')</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Reunion</title>
@@ -186,6 +185,11 @@ input,textarea,select,button{font-family:inherit}
 .pp-dot.on{background:var(--grn);box-shadow:0 0 6px var(--grn)}
 .inbox textarea{flex:1;border:none;background:none;color:var(--t1);font-size:14px;resize:none;outline:none;min-height:44px;max-height:260px;line-height:1.5;padding:7px 4px}
 .inbox textarea::placeholder{color:var(--t4)}
+.mic-btn{width:34px;height:34px;border-radius:9px;background:var(--acs);border:none;color:var(--t3);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.mic-btn:hover{color:var(--ac);background:var(--sf1)}
+.mic-btn.recording{background:linear-gradient(135deg,var(--red),#d04050);color:#fff;animation:mic-pulse 1.2s infinite}
+.mic-btn.hidden{display:none}
+@keyframes mic-pulse{0%{box-shadow:0 0 0 0 rgba(240,96,104,.4)}70%{box-shadow:0 0 0 10px rgba(240,96,104,0)}100%{box-shadow:0 0 0 0 rgba(240,96,104,0)}}
 .sndbtn{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;border:none;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;box-shadow:0 2px 8px rgba(74,122,245,.15),0 2px 8px rgba(155,109,255,.1)}
 .sndbtn:hover{transform:scale(1.05)}
 .sndbtn.stop{background:linear-gradient(135deg,var(--red),#d04050);box-shadow:0 2px 8px rgba(240,96,104,.2)}
@@ -352,6 +356,28 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
   .mdl{border-radius:18px;max-width:560px;max-height:85vh}
   .panel{max-width:340px;width:340px;right:-340px}
 }
+/* 语音消息样式 */
+.msg-voice{display:flex;flex-direction:column;gap:4px;background:var(--ubbl);padding:9px 14px;border-radius:16px 16px 4px 16px;max-width:88%;cursor:pointer}
+.message.u .msg-voice{border-radius:16px 16px 4px 16px}
+.mv-top{display:flex;align-items:center;gap:8px}
+.mv-icon{font-size:14px;color:var(--ac)}
+.mv-wave{display:flex;gap:2px;align-items:center;height:14px}
+.mv-wave span{width:3px;background:var(--t3);border-radius:2px;height:4px}
+.msg-voice.playing .mv-wave span{animation:wave-anim 1s infinite ease-in-out}
+.msg-voice.playing .mv-wave span:nth-child(2){animation-delay:.1s;height:10px}
+.msg-voice.playing .mv-wave span:nth-child(3){animation-delay:.2s;height:6px}
+.msg-voice.playing .mv-wave span:nth-child(4){animation-delay:.3s;height:12px}
+.msg-voice.playing .mv-wave span:nth-child(5){animation-delay:.4s;height:8px}
+@keyframes wave-anim{0%,100%{height:4px}50%{height:12px}}
+.mv-dur{font-size:11px;color:var(--t3);margin-left:auto}
+.mv-text{font-size:13px;color:var(--t1);max-height:0;overflow:hidden;transition:max-height .3s var(--ease),margin .3s}
+.msg-voice.expanded .mv-text{max-height:200px;margin-top:4px}
+/* TTS 播放按钮样式 */
+.tts-btn{background:none;border:none;color:var(--t4);cursor:pointer;font-size:10px;padding:0 4px;display:inline-flex;align-items:center}
+.tts-btn:hover{color:var(--ac)}
+.tts-btn.loading i{animation:spin 1s linear infinite}
+.tts-btn.playing{color:var(--ac)}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 <style id="custom-css"></style>
 </head>
@@ -405,6 +431,7 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
           </div>
         </div>
         <textarea id="uIn" rows="1" placeholder="输入消息…"></textarea>
+        <button class="mic-btn hidden" id="micBtn" onclick="toggleMic()"><i class="fas fa-microphone"></i></button>
         <button class="sndbtn" id="sendBtn" onclick="onSendClick()"><i class="fas fa-arrow-up"></i></button>
       </div>
       <input type="file" id="imgIn" accept="image/*" multiple hidden onchange="pickFile(this,true)">
@@ -495,6 +522,19 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
 
         <div class="sg-sep"></div>
         <div class="sg">
+          <label class="sg-l"><i class="fas fa-volume-up" style="color:var(--ac2);margin-right:4px"></i>语音播报 (TTS) 设置</label>
+          <select class="sg-i" id="i_ttsType" style="margin-bottom:8px">
+            <option value="openai">OpenAI 格式 (硅基/Fish/OpenAI)</option>
+            <option value="elevenlabs">ElevenLabs 格式</option>
+          </select>
+          <input class="sg-i" id="i_ttsBase" placeholder="TTS API 地址 (如 https://api.siliconflow.cn/v1)" style="margin-bottom:6px">
+          <input class="sg-i" id="i_ttsKey" type="password" placeholder="TTS API 密钥" style="margin-bottom:6px">
+          <input class="sg-i" id="i_ttsVoice" placeholder="音色 ID (如 Onyx 或 你克隆的ID)">
+          <div class="sg-h">填好后，AI消息旁会出现小喇叭，点击按需生成语音。</div>
+        </div>
+
+        <div class="sg-sep"></div>
+        <div class="sg">
           <label class="sg-l">API 预设</label>
           <div style="display:flex;gap:5px;margin-bottom:6px">
             <input class="sg-i" id="presetName" placeholder="预设名称" style="flex:1">
@@ -540,7 +580,7 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
 
 <script>
 const Q=s=>document.querySelector(s),QQ=s=>document.querySelectorAll(s);
-let S={theme:'dark',sOn:false,tOn:false,cfg:{base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:''},mem:[],chats:{},cid:null,anni:[],css:'',presets:[],worldBooks:[],notes:[],letters:[],letRead:0};
+let S={theme:'dark',sOn:false,tOn:false,cfg:{base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:''},mem:[],chats:{},cid:null,anni:[],css:'',presets:[],worldBooks:[],notes:[],letters:[],letRead:0};
 let busy=false,ctrl=null,pf=[],tmpA={u:'',a:''};
 let editingWB=null;
 
@@ -607,13 +647,17 @@ async function svDB(){
 }
 
 function fixupData(){
-  if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:''};
+  if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:''};
   if(!S.cfg.gWB)S.cfg.gWB=[];
   if(!S.cfg.searchBase)S.cfg.searchBase='';
   if(!S.cfg.searchKey)S.cfg.searchKey='';
   if(!S.cfg.visionBase)S.cfg.visionBase='';
   if(!S.cfg.visionKey)S.cfg.visionKey='';
   if(!S.cfg.visionModel)S.cfg.visionModel='';
+  if(!S.cfg.ttsType)S.cfg.ttsType='openai';
+  if(!S.cfg.ttsBase)S.cfg.ttsBase='';
+  if(!S.cfg.ttsKey)S.cfg.ttsKey='';
+  if(!S.cfg.ttsVoice)S.cfg.ttsVoice='';
   if(!S.mem)S.mem=[];
   if(!S.chats)S.chats={};
   if(!S.anni)S.anni=[];
@@ -823,7 +867,7 @@ function getFullStats(){
   let streak=0;const now=new Date();for(let i=0;i<365;i++){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');if(counts[k])streak++;else if(i>0)break}
   let out=`[陪伴密度统计]\n- 累计陪伴天数：${totalDays}天\n- 累计消息数：${totalMsgs}条\n- 日均消息：${avg}条\n- 最多一天：${maxEntry[0]||'-'} (${maxEntry[1]}条)\n- 今日消息：${todayN}条\n- 连续陪伴：${streak}天\n`;
   if(dates.length)out+=`- 首次对话：${dates[0]}\n- 最近对话：${dates[dates.length-1]}\n`;
-  const recent=[];for(let i=29;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');if(counts[k])recent.push(`${k}:${counts[k]}`)}
+  const recent=[];for(let i=29;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')-'0'+String(d.getDate()).padStart(2,'0');if(counts[k])recent.push(`${k}:${counts[k]}`)}
   if(recent.length)out+=`\n[最近30天活跃日]\n${recent.join('；')}\n`;
   if(S.anni.length){const today2=new Date();today2.setHours(0,0,0,0);out+=`\n[纪念日完整列表]\n`;S.anni.forEach(a=>{const ad=new Date(a.date+'T00:00:00');const diff=Math.floor((today2-ad)/(864e5));const label=diff>=0?`已${diff}天`:`还有${-diff}天`;out+=`- ${a.name}（${a.date}）${label}\n`})}else{out+=`\n[纪念日] 暂无\n`}
   return out}
@@ -887,6 +931,7 @@ function openSettings(){
   Q('#i_tok').value=S.cfg.tok||4096;Q('#i_temp').value=S.cfg.temp||.7;
   Q('#i_sBase').value=S.cfg.searchBase||'';Q('#i_sKey').value=S.cfg.searchKey||'';
   Q('#i_vBase').value=S.cfg.visionBase||'';Q('#i_vKey').value=S.cfg.visionKey||'';Q('#i_vModel').value=S.cfg.visionModel||'';
+  Q('#i_ttsType').value=S.cfg.ttsType||'openai';Q('#i_ttsBase').value=S.cfg.ttsBase||'';Q('#i_ttsKey').value=S.cfg.ttsKey||'';Q('#i_ttsVoice').value=S.cfg.ttsVoice||'';
   Q('#i_gsys').value=S.cfg.gSys||'';const c=cc();Q('#i_csys').value=c?(c.sys||''):'';
   Q('#p_uN').value=S.cfg.uN||'';Q('#p_aN').value=S.cfg.aN||'助手';
   tmpA={u:S.cfg.uA||'',a:S.cfg.aA||''};
@@ -900,6 +945,7 @@ function saveS(){
   S.cfg.cur=Q('#i_model').value;S.cfg.tok=parseInt(Q('#i_tok').value)||4096;S.cfg.temp=parseFloat(Q('#i_temp').value)||.7;
   S.cfg.searchBase=Q('#i_sBase').value.trim();S.cfg.searchKey=Q('#i_sKey').value.trim();
   S.cfg.visionBase=Q('#i_vBase').value.trim();S.cfg.visionKey=Q('#i_vKey').value.trim();S.cfg.visionModel=Q('#i_vModel').value.trim();
+  S.cfg.ttsType=Q('#i_ttsType').value;S.cfg.ttsBase=Q('#i_ttsBase').value.trim();S.cfg.ttsKey=Q('#i_ttsKey').value.trim();S.cfg.ttsVoice=Q('#i_ttsVoice').value.trim();
   S.cfg.gSys=Q('#i_gsys').value;S.cfg.uN=Q('#p_uN').value.trim();S.cfg.aN=Q('#p_aN').value.trim()||'助手';
   S.cfg.uA=tmpA.u;S.cfg.aA=tmpA.a;const c=cc();if(c)c.sys=Q('#i_csys').value;
   S.css=Q('#i_css').value;applyCSS();sv();closeS();rM();toast('已保存')}
@@ -975,22 +1021,93 @@ function greeting(){
 
 function onSendClick(){if(busy){if(ctrl)ctrl.abort();return}doSend(false)}
 
-async function doSend(isRe){
+/* ===== STT (语音转文字) ===== */
+let recognition=null,isRecording=false,micTimeout=null,currentTranscript='';
+function initRec(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return null;
+  const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
+  r.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)currentTranscript+=t;else interim+=t}};
+  r.onerror=e=>{stopMic(true)};
+  r.onend=()=>{if(isRecording)stopMic(true)};
+  return r;
+}
+function toggleMic(){
+  if(isRecording){stopMic(true)}
+  else{
+    if(!recognition)recognition=initRec();
+    if(!recognition){toast('当前浏览器不支持语音输入');return}
+    isRecording=true;currentTranscript='';
+    try{recognition.start();Q('#micBtn').classList.add('recording');Q('#micBtn').innerHTML='<i class="fas fa-stop"></i>';micTimeout=setTimeout(()=>stopMic(true),15000)}catch(e){toast('启动失败，请重试')}
+  }
+}
+function stopMic(send=false){
+  if(!isRecording)return;
+  isRecording=false;clearTimeout(micTimeout);
+  try{recognition.stop()}catch(e){}
+  Q('#micBtn').classList.remove('recording');Q('#micBtn').innerHTML='<i class="fas fa-microphone"></i>';
+  if(send&&currentTranscript.trim()){doSend(false,currentTranscript.trim(),true)}
+  else if(send){toast('没有识别到声音')}
+}
+
+/* ===== TTS (语音播报) ===== */
+let currentAudio=null,currentAudioMsgId=null;
+async function toggleTTS(msgId){
+  if(currentAudioMsgId===msgId&&currentAudio){
+    currentAudio.pause();currentAudio=null;currentAudioMsgId=null;
+    const btn=document.querySelector(`.message[data-id="${msgId}"] .tts-btn`);if(btn){btn.classList.remove('playing');btn.innerHTML='<i class="fas fa-volume-up"></i>'}
+    return;
+  }
+  const c=cc();if(!c)return;const msg=c.msgs.find(m=>m.id===msgId);if(!msg)return;
+  if(msg.audio){playAudio(msg.audio,msgId);return}
+  if(!S.cfg.ttsBase||!S.cfg.ttsKey||!S.cfg.ttsVoice){toast('请先在设置中配置 TTS API');return}
+  const btn=document.querySelector(`.message[data-id="${msgId}"] .tts-btn`);if(btn){btn.classList.add('loading');btn.innerHTML='<i class="fas fa-spinner"></i>'}
+  try{
+    const text=msg.content;
+    let audioData=null;
+    if(S.cfg.ttsType==='elevenlabs'){
+      const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/v1/text-to-speech/'+S.cfg.ttsVoice;
+      const res=await fetch(url,{method:'POST',headers:{'xi-api-key':S.cfg.ttsKey,'Content-Type':'application/json','Accept':'audio/mpeg'},body:JSON.stringify({text,model_id:'eleven_multilingual_v2'})});
+      if(!res.ok)throw new Error('TTS Error '+res.status);
+      const blob=await res.blob();audioData=await blobToB64(blob);
+    }else{
+      const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/audio/speech';
+      const res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.cfg.ttsKey,'Content-Type':'application/json'},body:JSON.stringify({model:'tts-1',input:text,voice:S.cfg.ttsVoice})});
+      if(!res.ok)throw new Error('TTS Error '+res.status);
+      const blob=await res.blob();audioData=await blobToB64(blob);
+    }
+    msg.audio=audioData;sv();playAudio(audioData,msgId);
+  }catch(e){
+    toast('语音生成失败：'+e.message);
+    if(btn){btn.classList.remove('loading');btn.innerHTML='<i class="fas fa-volume-up"></i>'}
+  }
+}
+function blobToB64(blob){return new Promise(r=>{const fr=new FileReader();fr.onload=e=>r(e.target.result);fr.readAsDataURL(blob)})}
+function playAudio(data,msgId){
+  if(currentAudio)currentAudio.pause();
+  currentAudio=new Audio(data);currentAudioMsgId=msgId;
+  QQ('.tts-btn').forEach(b=>{b.classList.remove('playing');b.innerHTML='<i class="fas fa-volume-up"></i>'});
+  const btn=document.querySelector(`.message[data-id="${msgId}"] .tts-btn`);if(btn){btn.classList.remove('loading');btn.classList.add('playing');btn.innerHTML='<i class="fas fa-pause"></i>'}
+  currentAudio.play();currentAudio.onended=()=>{if(btn){btn.classList.remove('playing');btn.innerHTML='<i class="fas fa-volume-up"></i>'}currentAudio=null;currentAudioMsgId=null};
+}
+
+async function doSend(isRe,txtOverride=null,isVoice=false){
   const c=cc();if(!c)return;
-  if(!isRe){const inp=Q('#uIn');const txt=inp.value.trim();if(!txt&&!pf.length)return;
+  if(!isRe){
+    const inp=Q('#uIn');const txt=txtOverride!==null?txtOverride:inp.value.trim();if(!txt&&!pf.length)return;
     const timePrefix='[当前时间: '+getLocalTimeStr()+']\n';
     let content=timePrefix+txt;
     const files=pf.map(f=>({name:f.name,img:f.img,data:f.img?f.data:null}));pf.forEach(f=>{content+=f.img?'\n[图片: '+f.name+']':'\n\n--- '+f.name+' ---\n'+f.data+'\n---'});
-    c.msgs.push({id:'m_'+uid(),role:'user',content,rawText:txt,files,ts:Date.now()});pf=[];inp.value='';inp.style.height='';rF();if(c.title==='新对话'&&txt){c.title=txt.slice(0,24)+(txt.length>24?'…':'');uT();rL()}}
+    c.msgs.push({id:'m_'+uid(),role:'user',content,rawText:txt,files,ts:Date.now(),isVoice:isVoice});
+    if(txtOverride===null){pf=[];inp.value='';inp.style.height='';rF();uMic()}
+    if(c.title==='新对话'&&txt){c.title=txt.slice(0,24)+(txt.length>24?'…':'');uT();rL()}
+  }
   const last=c.msgs[c.msgs.length-1];if(!last||last.role!=='user')return;
 
   const imgFiles=(last.files||[]).filter(f=>f.img&&f.data);
-  let visionDesc=null;
-  let usedVision=false;
+  let visionDesc=null,usedVision=false;
   if(imgFiles.length>0&&S.cfg.visionBase&&S.cfg.visionKey&&S.cfg.visionModel){
-    toast('正在识图…');
-    visionDesc=await describeImages(imgFiles,last.rawText||'');
-    if(visionDesc)usedVision=true;
+    toast('正在识图…');visionDesc=await describeImages(imgFiles,last.rawText||'');if(visionDesc)usedVision=true;
   }
 
   const api=[];let sys=(S.cfg.gSys||'').trim();const csys=(c.sys||'').trim();
@@ -1008,7 +1125,7 @@ async function doSend(isRe){
   sys+='\n\n[信箱工具] 用 <write_letter>内容</write_letter> 写信。';
   sys+='\n\n[美化工具] 用 <edit_style>CSS代码</edit_style> 覆盖CSS，或 <append_style>CSS代码</append_style> 追加CSS。';
   sys+='\n\n[统计工具] 用 <get_stats/> 获取陪伴密度完整数据。';
-  if(S.tOn)sys+='\n\n[思考模式] 请先用 <think>...</think> 深入思考，然后给出正式回复。';
+  if(S.tOn)sys+='\n\n[思考模式] 请先用  深入思考，然后给出正式回复。';
   api.push({role:'system',content:sys});
 
   c.msgs.forEach(m=>{
@@ -1017,27 +1134,16 @@ async function doSend(isRe){
         const parts=[];parts.push({type:'text',text:m.content});
         m.files.forEach(f=>{if(f.img&&f.data)parts.push({type:'image_url',image_url:{url:f.data,detail:'auto'}})});
         api.push({role:'user',content:parts});
-      } else {
-        api.push({role:m.role,content:m.content});
-      }
-    } else {
-      api.push({role:m.role,content:m.content});
-    }
+      } else { api.push({role:m.role,content:m.content}); }
+    } else { api.push({role:m.role,content:m.content}); }
   });
 
-  if(visionDesc){
-    api.push({role:'system',content:'[识图结果 - 以下是图片内容的详细描述：]\n'+visionDesc+'\n\n请基于以上图片描述回答用户的问题。'});
-  }
-
+  if(visionDesc){ api.push({role:'system',content:'[识图结果 - 以下是图片内容的详细描述：]\n'+visionDesc+'\n\n请基于以上图片描述回答用户的问题。'}); }
   let didS=false;
-  if(S.sOn){
-    const q=(last.rawText||last.content||'').slice(0,100);
-    if(q){const sr=await searchWeb(q);if(sr){api.push({role:'system',content:'[联网搜索结果：]\n'+sr});didS=true}}
-  }
+  if(S.sOn){ const q=(last.rawText||last.content||'').slice(0,100); if(q){const sr=await searchWeb(q);if(sr){api.push({role:'system',content:'[联网搜索结果：]\n'+sr});didS=true}} }
 
   const aM={id:'m_'+uid(),role:'assistant',content:'',thinking:'',model:S.cfg.cur,searched:didS,memSaved:false,letSaved:false,styleSaved:false,statsUsed:false,visionUsed:usedVision,ts:Date.now()};c.msgs.push(aM);sv();rM();
   busy=true;ctrl=new AbortController();uSnd();
-  const timeoutId = setTimeout(() => { if(busy && ctrl) ctrl.abort(); }, 300000);
   try{
     const runStream=async()=>{
       const res=await sApi(api,ctrl.signal);if(!res.ok)throw new Error('API '+res.status+': '+(await res.text()).slice(0,200));
@@ -1081,15 +1187,10 @@ async function doSend(isRe){
       else if(errMsg.includes('502')) errMsg = 'API 502 网关错误';
       else errMsg = errMsg.slice(0, 100);
       aM.content='请求失败：' + errMsg + '\n\n[请点击下方“删除”或“重新生成”按钮]';
-    } else if(!aM.content){
-      aM.content='请求超时或被中止，请删除本条重试。';
-    }
+    } else if(!aM.content){ aM.content='请求超时或被中止，请删除本条重试。'; }
     rM();
-  }
-  finally{
-    clearTimeout(timeoutId);
-    busy=false;ctrl=null;uSnd();sv();
-  }}
+  } finally { busy=false;ctrl=null;uSnd();sv(); }
+}
 
 function rL(){
   const el=Q('#chatList');const sorted=Object.values(S.chats).sort((a,b)=>b.ts-a.ts);
@@ -1109,10 +1210,26 @@ function bMsg(m){
   const av=isU?(S.cfg.uA?`<img src="${S.cfg.uA}">`:'<i class="fas fa-user"></i>'):(S.cfg.aA?`<img src="${S.cfg.aA}">`:'<i class="fas fa-robot"></i>');
   const name=isU?(S.cfg.uN||'用户'):(S.cfg.aN||'助手');
   const model=(!isU&&m.model)?`<span class="m-model">${esc(m.model)}</span>`:'';
+  const ttsBtn=!isU?`<button class="tts-btn" onclick="event.stopPropagation();toggleTTS('${m.id}')"><i class="fas fa-volume-up"></i></button>`:'';
   const time=fmtTime(m.ts);let body='';
-  if(isU){let d=getDisplayText(m);body=esc(d).replace(/\n/g,'<br>');
-    if(m.files&&m.files.length){body+='<div class="m-files">';m.files.forEach(f=>{body+=f.img&&f.data?`<span class="m-file"><img src="${f.data}"> ${esc(f.name)}</span>`:`<span class="m-file"><i class="fas fa-file-alt"></i> ${esc(f.name)}</span>`});body+='</div>'}}
-  else{
+  
+  if(isU){
+    if(m.isVoice){
+      // 渲染语音条消息
+      const dur=Math.max(1,Math.round((m.content||'').length/4));
+      body=`<div class="msg-voice" onclick="this.classList.toggle('expanded')">
+        <div class="mv-top">
+          <span class="mv-icon"><i class="fas fa-play-circle"></i></span>
+          <div class="mv-wave"><span></span><span></span><span></span><span></span><span></span></div>
+          <span class="mv-dur">0:${String(dur).padStart(2,'0')}"</span>
+        </div>
+        <div class="mv-text">${esc(getDisplayText(m))}</div>
+      </div>`;
+    } else {
+      let d=getDisplayText(m);body=esc(d).replace(/\n/g,'<br>');
+      if(m.files&&m.files.length){body+='<div class="m-files">';m.files.forEach(f=>{body+=f.img&&f.data?`<span class="m-file"><img src="${f.data}"> ${esc(f.name)}</span>`:`<span class="m-file"><i class="fas fa-file-alt"></i> ${esc(f.name)}</span>`});body+='</div>'}
+    }
+  } else {
     if(m.visionUsed)body+='<div class="bdg-v"><i class="fas fa-eye"></i> 已识图</div>';
     if(m.statsUsed)body+='<div class="bdg-stats"><i class="fas fa-chart-line"></i> 已获取陪伴统计</div>';
     if(m.searched)body+='<div class="bdg-s"><i class="fas fa-globe"></i> 已联网搜索</div>';
@@ -1123,13 +1240,15 @@ function bMsg(m){
     else if(busy&&m===cc().msgs[cc().msgs.length-1])body+=`<div class="gen"><div class="gd"><span></span><span></span><span></span></div>正在生成…</div>`;
     if(m.memSaved)body+='<div class="bdg-m"><i class="fas fa-check-circle"></i> 记忆已更新</div>';
     if(m.letSaved)body+='<div class="bdg-let"><i class="fas fa-envelope"></i> 已写入信箱</div>';
-    if(m.styleSaved)body+='<div class="bdg-style"><i class="fas fa-palette"></i> 美化已更新</div>'}
+    if(m.styleSaved)body+='<div class="bdg-style"><i class="fas fa-palette"></i> 美化已更新</div>';
+  }
+  
   let acts='';
   if(isU)acts=`<div class="m-acts"><button class="ma" onclick="startEdit('${m.id}')"><i class="fas fa-pen"></i> 编辑</button><button class="ma rd" onclick="delMsg('${m.id}')"><i class="fas fa-trash"></i> 删除</button></div>`;
   else acts=`<div class="m-acts ${isFailed?'force-show':''}"><button class="ma" onclick="regen('${m.id}')"><i class="fas fa-rotate"></i> 重新生成</button><button class="ma" onclick="startEdit('${m.id}')"><i class="fas fa-pen"></i> 编辑</button><button class="ma rd" onclick="delMsg('${m.id}')"><i class="fas fa-trash"></i> 删除</button></div>`;
   const editVal=isU?getDisplayText(m):(m.content||'');
   const eb=`<div class="ebox" id="eb_${m.id}"><textarea>${esc(editVal)}</textarea><div class="ebox-b"><button class="eb-no" onclick="cancelEdit('${m.id}')">取消</button><button class="eb-ok" onclick="saveEdit('${m.id}')">保存</button></div></div>`;
-  return`<div class="message ${isU?'u':'a'} ${isFailed?'failed':''}" data-id="${m.id}"><div class="msg-row"><div class="m-av ${isU?'uav':'aav'}">${av}</div><div class="m-body"><div class="m-head"><span class="m-name">${esc(name)}</span>${model}<span class="m-time">${time}</span></div><div class="m-text">${body}</div>${acts}${eb}</div></div></div>`}
+  return`<div class="message ${isU?'u':'a'} ${isFailed?'failed':''}" data-id="${m.id}"><div class="msg-row"><div class="m-av ${isU?'uav':'aav'}">${av}</div><div class="m-body"><div class="m-head"><span class="m-name">${esc(name)}</span>${model}<span class="m-time">${time}</span>${ttsBtn}</div><div class="m-text">${body}</div>${acts}${eb}</div></div></div>`}
 
 function sUpd(m){
   const el=document.querySelector(`.message[data-id="${m.id}"] .m-text`);if(!el)return;let h='';
@@ -1144,6 +1263,7 @@ function sUpd(m){
 
 function scrollEnd(){const w=Q('#msgW');requestAnimationFrame(()=>w.scrollTop=w.scrollHeight)}
 function uSnd(){const b=Q('#sendBtn');if(busy){b.innerHTML='<i class="fas fa-stop"></i>';b.classList.add('stop')}else{b.innerHTML='<i class="fas fa-arrow-up"></i>';b.classList.remove('stop')}}
+function uMic(){const inp=Q('#uIn');const mic=Q('#micBtn');if(inp.value.trim()&&!isRecording){mic.classList.add('hidden')}else{mic.classList.remove('hidden')}}
 
 ;(function(){
   const h=Q('#resizeH'),a=Q('#inArea');let sy,sh,drag=false;
@@ -1153,12 +1273,12 @@ function uSnd(){const b=Q('#sendBtn');if(busy){b.innerHTML='<i class="fas fa-sto
   function up(){drag=false;document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.removeEventListener('touchmove',mv);document.removeEventListener('touchend',up)}
   h.addEventListener('mousedown',dn);h.addEventListener('touchstart',dn,{passive:false})})();
 
-Q('#uIn').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,260)+'px'});
+Q('#uIn').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,260)+'px';uMic()});
 
 async function init(){
   await load();
   applyTheme();applyCSS();
-  if(!Object.keys(S.chats).length)newChat();else{rL();rM();rF();uT()}
+  if(!Object.keys(S.chats).length)newChat();else{rL();rM();rF();uT();uMic()}
   rMem();uMB();uLetB();rTags();
   Q('#dotS').classList.toggle('on',S.sOn);Q('#dotT').classList.toggle('on',S.tOn)}
 init();
