@@ -1021,91 +1021,180 @@ function greeting(){
 
 function onSendClick(){if(busy){if(ctrl)ctrl.abort();return}doSend(false)}
 
-/* ===== STT (语音转文字) ===== */
-let recognition=null,isRecording=false,currentTranscript='',silenceTimer=null,restartCount=0;
-function resetSilenceTimer(){
-  if(silenceTimer)clearTimeout(silenceTimer);
-  // 15秒内没有继续说话，就自动发送
-  silenceTimer=setTimeout(()=>{if(isRecording)stopMic(true)},15000);
+/* ===== STT (语音转文字) - 终极优化版 ===== */
+let recognition = null;
+let isRecording = false;
+let finalTranscript = '';   // 已确认的完整文稿（跨重启累加）
+let interimTranscript = ''; // 当前还未 final 的半截
+let silenceTimer = null;
+let restartCount = 0;
+let pendingSend = false;    // 停麦后是否要发送
+let stopWatchdog = null;    // 防止 onend 不来导致卡死
+
+function resetSilenceTimer() {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  // 15 秒没继续说话 → 自动停并发送
+  silenceTimer = setTimeout(() => {
+    if (isRecording) stopMic(true);
+  }, 15000);
 }
-function initRec(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR)return null;
-  const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
-  r.onresult=e=>{
-    // 只要识别到声音，就重置 15 秒倒计时和重连计数
-    restartCount=0;
+
+function initRec() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+
+  const r = new SR();
+  r.lang = 'zh-CN';
+  r.continuous = true;
+  r.interimResults = true;
+
+  r.onresult = (e) => {
+    restartCount = 0;
     resetSilenceTimer();
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const t=e.results[i][0].transcript;
-      if(e.results[i].isFinal){
-        currentTranscript+=t;
+    interimTranscript = '';
+
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalTranscript += t;
+      } else {
+        interimTranscript += t;
       }
     }
+    // 这里去掉了实时显示在输入框里，纯后台识别
   };
-  r.onerror=e=>{
+
+  r.onerror = (e) => {
     console.error('语音识别错误:', e.error);
-    if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       toast('麦克风权限被拒绝或被系统拦截');
-      stopMic(false); // 权限被拒不发送
+      pendingSend = false;
+      stopMic(false);
     } else if (e.error === 'no-speech' || e.error === 'aborted') {
-      // 没说话或被中止，静默处理
+      // 静默
     } else {
-      // network 等其他错误（经常因为网络波动），静默处理，让 onend 去重连
       restartCount++;
-      if(restartCount > 3) {
+      if (restartCount > 3) {
         toast('网络似乎有些不稳定，正在努力重连...');
       }
     }
   };
-  r.onend=()=>{
-    if(isRecording){
-      // 延迟 300ms 重启，避免状态冲突导致重启失败（这是导致文字截断的罪魁祸首）
+
+  r.onend = () => {
+    // 断流前先抢救 interim，避免「只剩最后一次」
+    if (interimTranscript) {
+      finalTranscript += interimTranscript;
+      interimTranscript = '';
+    }
+
+    if (pendingSend) {
+      pendingSend = false;
+      if (stopWatchdog) {
+        clearTimeout(stopWatchdog);
+        stopWatchdog = null;
+      }
+      finishSend();
+      return;
+    }
+
+    if (isRecording) {
       setTimeout(() => {
-        if(isRecording){
-          try {
-            recognition.start();
-          } catch(err) {
-            console.warn('录音引擎重启失败:', err);
-            restartCount++;
-            if(restartCount > 5) {
-              toast('网络持续断开，已自动保存当前内容');
-              stopMic(true); // 实在连不上，结束录音并发送已有的部分
-            }
+        if (!isRecording) return;
+        try {
+          recognition.start();
+        } catch (err) {
+          console.warn('录音引擎重启失败:', err);
+          restartCount++;
+          if (restartCount > 5) {
+            toast('网络持续断开，已自动保存当前内容');
+            stopMic(true);
           }
         }
       }, 300);
     }
   };
+
   return r;
 }
-function toggleMic(){
-  if(isRecording){
-    // 手动点击停止，清除倒计时，立即发送
-    if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null}
-    stopMic(true)
-  }
-  else{
-    if(!recognition)recognition=initRec();
-    if(!recognition){toast('当前浏览器不支持语音输入');return}
-    isRecording=true;currentTranscript='';restartCount=0;
-    try{
-      recognition.start();
-      Q('#micBtn').classList.add('recording');
-      Q('#micBtn').innerHTML='<i class="fas fa-stop"></i>';
-      // 开始录音时，启动第一次 15 秒倒计时
-      resetSilenceTimer();
-    }catch(e){toast('启动失败，请重试')}
+
+function finishSend() {
+  const text = finalTranscript.trim();
+  finalTranscript = '';
+  interimTranscript = '';
+  if (text) {
+    doSend(false, text, true);
+  } else {
+    toast('没有识别到声音');
   }
 }
-function stopMic(send=false){
-  if(!isRecording)return;
-  isRecording=false;
-  if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null}
-  try{recognition.stop()}catch(e){}
-  Q('#micBtn').classList.remove('recording');Q('#micBtn').innerHTML='<i class="fas fa-microphone"></i>';
-  if(send&&currentTranscript.trim()){doSend(false,currentTranscript.trim(),true)}
-  else if(send){toast('没有识别到声音')}
+
+function toggleMic() {
+  if (isRecording) {
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+    stopMic(true);
+  } else {
+    if (!recognition) recognition = initRec();
+    if (!recognition) {
+      toast('当前浏览器不支持语音输入');
+      return;
+    }
+    isRecording = true;
+    pendingSend = false;
+    finalTranscript = '';
+    interimTranscript = '';
+    restartCount = 0;
+    try {
+      recognition.start();
+      Q('#micBtn').classList.add('recording');
+      Q('#micBtn').innerHTML = '<i class="fas fa-stop"></i>';
+      resetSilenceTimer();
+    } catch (e) {
+      isRecording = false;
+      toast('启动失败，请重试');
+    }
+  }
+}
+
+function stopMic(send = false) {
+  if (!isRecording && !pendingSend) return;
+
+  isRecording = false;
+  if (silenceTimer) {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+
+  Q('#micBtn').classList.remove('recording');
+  Q('#micBtn').innerHTML = '<i class="fas fa-microphone"></i>';
+
+  if (send) {
+    pendingSend = true;
+    try {
+      recognition && recognition.stop();
+    } catch (e) {}
+
+    if (stopWatchdog) clearTimeout(stopWatchdog);
+    stopWatchdog = setTimeout(() => {
+      if (pendingSend) {
+        pendingSend = false;
+        if (interimTranscript) {
+          finalTranscript += interimTranscript;
+          interimTranscript = '';
+        }
+        finishSend();
+      }
+    }, 800);
+  } else {
+    pendingSend = false;
+    try {
+      recognition && recognition.stop();
+    } catch (e) {}
+    finalTranscript = '';
+    interimTranscript = '';
+  }
 }
 
 /* ===== TTS (语音播报) ===== */
@@ -1121,7 +1210,8 @@ async function toggleTTS(msgId){
   if(!S.cfg.ttsBase||!S.cfg.ttsKey||!S.cfg.ttsVoice){toast('请先在设置中配置 TTS API');return}
   const btn=document.querySelector(`.message[data-id="${msgId}"] .tts-btn`);if(btn){btn.classList.add('loading');btn.innerHTML='<i class="fas fa-spinner"></i>'}
   try{
-    const text=msg.content;
+    // 过滤掉 *包裹的动作描写*，并清理多余的空格和换行
+    const text = msg.content.replace(/\*[\s\S]*?\*/g, '').replace(/\s+/g, ' ').trim();
     let audioData=null;
     if(S.cfg.ttsType==='elevenlabs'){
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/v1/text-to-speech/'+S.cfg.ttsVoice;
@@ -1209,7 +1299,7 @@ async function doSend(isRe,txtOverride=null,isVoice=false){
       while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
         for(const line of lines){const t=line.trim();if(!t||t==='data: [DONE]'||!t.startsWith('data: '))continue;
           try{const j=JSON.parse(t.slice(6));const d=j.choices?.[0]?.delta?.content;if(!d)continue;full+=d;
-          if(S.tOn){const te=full.indexOf('</think>');if(te!==-1){const ts2=full.indexOf('<think>');aM.thinking=full.slice(ts2!==-1?ts2+7:0,te).trim();aM.content=full.slice(te+8).trim()}else if(full.includes('<think>')){aM.thinking=full.slice(full.indexOf('<think>')+7);aM.content=''}else aM.content=full}else aM.content=full;
+          if(S.tOn){const te=full.indexOf('');if(te!==-1){const ts2=full.indexOf('');aM.thinking=full.slice(ts2!==-1?ts2+7:0,te).trim();aM.content=full.slice(te+8).trim()}else if(full.includes('')){aM.thinking=full.slice(full.indexOf('')+7);aM.content=''}else aM.content=full}else aM.content=full;
           sUpd(aM)}catch(e){}}}
       return full};
     let fullResult=await runStream();
@@ -1273,7 +1363,6 @@ function bMsg(m){
   
   if(isU){
     if(m.isVoice){
-      // 渲染语音条消息
       const dur=Math.max(1,Math.round((m.content||'').length/4));
       body=`<div class="msg-voice" onclick="this.classList.toggle('expanded')">
         <div class="mv-top">
