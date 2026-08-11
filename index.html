@@ -1209,30 +1209,53 @@ async function toggleTTS(msgId){
   }
   const c=cc();if(!c)return;const msg=c.msgs.find(m=>m.id===msgId);if(!msg)return;
   if(msg.audio){playAudio(msg.audio,msgId);return}
-  if(!S.cfg.ttsBase||!S.cfg.ttsKey||!S.cfg.ttsVoice){toast('请先在设置中配置 TTS API');return}
+  if(!S.cfg.ttsBase||!S.cfg.ttsKey){toast('请先在设置中配置 TTS API');return}
   const btn=document.querySelector(`.message[data-id="${msgId}"] .tts-btn`);if(btn){btn.classList.add('loading');btn.innerHTML='<i class="fas fa-spinner"></i>'}
   try{
     // 过滤掉 *包裹的动作描写*，并清理多余的空格和换行
     const text = msg.content.replace(/\*[\s\S]*?\*/g, '').replace(/\s+/g, ' ').trim();
     let audioData=null;
-    if(S.cfg.ttsType==='elevenlabs'){
+    
+    if(S.cfg.ttsBase.includes('fish.audio')) {
+      // 👉 Fish Audio 专属格式
+      const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/tts';
+      const res=await fetch(url,{
+        method:'POST',
+        headers:{
+          'Authorization':'Bearer '+S.cfg.ttsKey,
+          'Content-Type':'application/json',
+          'model': (S.cfg.ttsModel || 's2-pro')
+        },
+        body:JSON.stringify({
+          text: text,
+          reference_id: (S.cfg.ttsVoice || 'default'),
+          format: 'mp3'
+        })
+      });
+      if(!res.ok)throw new Error('TTS Error '+res.status);
+      const blob=await res.blob();audioData=await blobToB64(blob);
+      
+    } else if(S.cfg.ttsType==='elevenlabs'){
+      // ElevenLabs 格式
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/v1/text-to-speech/'+S.cfg.ttsVoice;
       const res=await fetch(url,{method:'POST',headers:{'xi-api-key':S.cfg.ttsKey,'Content-Type':'application/json','Accept':'audio/mpeg'},body:JSON.stringify({text,model_id:(S.cfg.ttsModel||'eleven_multilingual_v2')})});
       if(!res.ok)throw new Error('TTS Error '+res.status);
       const blob=await res.blob();audioData=await blobToB64(blob);
-    }else{
+      
+    } else {
+      // OpenAI / 硅基流动 格式
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/audio/speech';
       const res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.cfg.ttsKey,'Content-Type':'application/json'},body:JSON.stringify({model:(S.cfg.ttsModel||'tts-1'),input:text,voice:S.cfg.ttsVoice})});
       if(!res.ok)throw new Error('TTS Error '+res.status);
       const blob=await res.blob();audioData=await blobToB64(blob);
     }
+    
     msg.audio=audioData;sv();playAudio(audioData,msgId);
   }catch(e){
     toast('语音生成失败：'+e.message);
     if(btn){btn.classList.remove('loading');btn.innerHTML='<i class="fas fa-volume-up"></i>'}
   }
 }
-function blobToB64(blob){return new Promise(r=>{const fr=new FileReader();fr.onload=e=>r(e.target.result);fr.readAsDataURL(blob)})}
 function playAudio(data,msgId){
   if(currentAudio)currentAudio.pause();
   currentAudio=new Audio(data);currentAudioMsgId=msgId;
