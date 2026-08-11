@@ -529,7 +529,8 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
           </select>
           <input class="sg-i" id="i_ttsBase" placeholder="TTS API 地址 (如 https://api.siliconflow.cn/v1)" style="margin-bottom:6px">
           <input class="sg-i" id="i_ttsKey" type="password" placeholder="TTS API 密钥" style="margin-bottom:6px">
-          <input class="sg-i" id="i_ttsVoice" placeholder="音色 ID (如 Onyx 或 你克隆的ID)">
+          <input class="sg-i" id="i_ttsVoice" placeholder="音色 ID (如 Onyx 或 你克隆的ID)" style="margin-bottom:6px">
+          <input class="sg-i" id="i_ttsModel" placeholder="模型 (如 tts-1 或 fishaudio/fish-speech-1.5)">
           <div class="sg-h">填好后，AI消息旁会出现小喇叭，点击按需生成语音。</div>
         </div>
 
@@ -580,7 +581,7 @@ textarea.sg-i{min-height:64px;resize:vertical;line-height:1.6}
 
 <script>
 const Q=s=>document.querySelector(s),QQ=s=>document.querySelectorAll(s);
-let S={theme:'dark',sOn:false,tOn:false,cfg:{base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:''},mem:[],chats:{},cid:null,anni:[],css:'',presets:[],worldBooks:[],notes:[],letters:[],letRead:0};
+let S={theme:'dark',sOn:false,tOn:false,cfg:{base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:'',ttsModel:''},mem:[],chats:{},cid:null,anni:[],css:'',presets:[],worldBooks:[],notes:[],letters:[],letRead:0};
 let busy=false,ctrl=null,pf=[],tmpA={u:'',a:''};
 let editingWB=null;
 
@@ -647,7 +648,7 @@ async function svDB(){
 }
 
 function fixupData(){
-  if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:''};
+  if(!S.cfg)S.cfg={base:'',key:'',models:[],cur:'',tok:4096,temp:.7,uN:'',uA:'',aN:'助手',aA:'',gSys:'',gWB:[],searchBase:'',searchKey:'',visionBase:'',visionKey:'',visionModel:'',ttsType:'openai',ttsBase:'',ttsKey:'',ttsVoice:'',ttsModel:''};
   if(!S.cfg.gWB)S.cfg.gWB=[];
   if(!S.cfg.searchBase)S.cfg.searchBase='';
   if(!S.cfg.searchKey)S.cfg.searchKey='';
@@ -658,6 +659,7 @@ function fixupData(){
   if(!S.cfg.ttsBase)S.cfg.ttsBase='';
   if(!S.cfg.ttsKey)S.cfg.ttsKey='';
   if(!S.cfg.ttsVoice)S.cfg.ttsVoice='';
+  if(!S.cfg.ttsModel)S.cfg.ttsModel='';
   if(!S.mem)S.mem=[];
   if(!S.chats)S.chats={};
   if(!S.anni)S.anni=[];
@@ -867,7 +869,7 @@ function getFullStats(){
   let streak=0;const now=new Date();for(let i=0;i<365;i++){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');if(counts[k])streak++;else if(i>0)break}
   let out=`[陪伴密度统计]\n- 累计陪伴天数：${totalDays}天\n- 累计消息数：${totalMsgs}条\n- 日均消息：${avg}条\n- 最多一天：${maxEntry[0]||'-'} (${maxEntry[1]}条)\n- 今日消息：${todayN}条\n- 连续陪伴：${streak}天\n`;
   if(dates.length)out+=`- 首次对话：${dates[0]}\n- 最近对话：${dates[dates.length-1]}\n`;
-  const recent=[];for(let i=29;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')-'0'+String(d.getDate()).padStart(2,'0');if(counts[k])recent.push(`${k}:${counts[k]}`)}
+  const recent=[];for(let i=29;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');if(counts[k])recent.push(`${k}:${counts[k]}`)}
   if(recent.length)out+=`\n[最近30天活跃日]\n${recent.join('；')}\n`;
   if(S.anni.length){const today2=new Date();today2.setHours(0,0,0,0);out+=`\n[纪念日完整列表]\n`;S.anni.forEach(a=>{const ad=new Date(a.date+'T00:00:00');const diff=Math.floor((today2-ad)/(864e5));const label=diff>=0?`已${diff}天`:`还有${-diff}天`;out+=`- ${a.name}（${a.date}）${label}\n`})}else{out+=`\n[纪念日] 暂无\n`}
   return out}
@@ -931,7 +933,7 @@ function openSettings(){
   Q('#i_tok').value=S.cfg.tok||4096;Q('#i_temp').value=S.cfg.temp||.7;
   Q('#i_sBase').value=S.cfg.searchBase||'';Q('#i_sKey').value=S.cfg.searchKey||'';
   Q('#i_vBase').value=S.cfg.visionBase||'';Q('#i_vKey').value=S.cfg.visionKey||'';Q('#i_vModel').value=S.cfg.visionModel||'';
-  Q('#i_ttsType').value=S.cfg.ttsType||'openai';Q('#i_ttsBase').value=S.cfg.ttsBase||'';Q('#i_ttsKey').value=S.cfg.ttsKey||'';Q('#i_ttsVoice').value=S.cfg.ttsVoice||'';
+  Q('#i_ttsType').value=S.cfg.ttsType||'openai';Q('#i_ttsBase').value=S.cfg.ttsBase||'';Q('#i_ttsKey').value=S.cfg.ttsKey||'';Q('#i_ttsVoice').value=S.cfg.ttsVoice||'';Q('#i_ttsModel').value=S.cfg.ttsModel||'';
   Q('#i_gsys').value=S.cfg.gSys||'';const c=cc();Q('#i_csys').value=c?(c.sys||''):'';
   Q('#p_uN').value=S.cfg.uN||'';Q('#p_aN').value=S.cfg.aN||'助手';
   tmpA={u:S.cfg.uA||'',a:S.cfg.aA||''};
@@ -945,7 +947,7 @@ function saveS(){
   S.cfg.cur=Q('#i_model').value;S.cfg.tok=parseInt(Q('#i_tok').value)||4096;S.cfg.temp=parseFloat(Q('#i_temp').value)||.7;
   S.cfg.searchBase=Q('#i_sBase').value.trim();S.cfg.searchKey=Q('#i_sKey').value.trim();
   S.cfg.visionBase=Q('#i_vBase').value.trim();S.cfg.visionKey=Q('#i_vKey').value.trim();S.cfg.visionModel=Q('#i_vModel').value.trim();
-  S.cfg.ttsType=Q('#i_ttsType').value;S.cfg.ttsBase=Q('#i_ttsBase').value.trim();S.cfg.ttsKey=Q('#i_ttsKey').value.trim();S.cfg.ttsVoice=Q('#i_ttsVoice').value.trim();
+  S.cfg.ttsType=Q('#i_ttsType').value;S.cfg.ttsBase=Q('#i_ttsBase').value.trim();S.cfg.ttsKey=Q('#i_ttsKey').value.trim();S.cfg.ttsVoice=Q('#i_ttsVoice').value.trim();S.cfg.ttsModel=Q('#i_ttsModel').value.trim();
   S.cfg.gSys=Q('#i_gsys').value;S.cfg.uN=Q('#p_uN').value.trim();S.cfg.aN=Q('#p_aN').value.trim()||'助手';
   S.cfg.uA=tmpA.u;S.cfg.aA=tmpA.a;const c=cc();if(c)c.sys=Q('#i_csys').value;
   S.css=Q('#i_css').value;applyCSS();sv();closeS();rM();toast('已保存')}
@@ -1215,12 +1217,12 @@ async function toggleTTS(msgId){
     let audioData=null;
     if(S.cfg.ttsType==='elevenlabs'){
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/v1/text-to-speech/'+S.cfg.ttsVoice;
-      const res=await fetch(url,{method:'POST',headers:{'xi-api-key':S.cfg.ttsKey,'Content-Type':'application/json','Accept':'audio/mpeg'},body:JSON.stringify({text,model_id:'eleven_multilingual_v2'})});
+      const res=await fetch(url,{method:'POST',headers:{'xi-api-key':S.cfg.ttsKey,'Content-Type':'application/json','Accept':'audio/mpeg'},body:JSON.stringify({text,model_id:(S.cfg.ttsModel||'eleven_multilingual_v2')})});
       if(!res.ok)throw new Error('TTS Error '+res.status);
       const blob=await res.blob();audioData=await blobToB64(blob);
     }else{
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/audio/speech';
-      const res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.cfg.ttsKey,'Content-Type':'application/json'},body:JSON.stringify({model:'tts-1',input:text,voice:S.cfg.ttsVoice})});
+      const res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.cfg.ttsKey,'Content-Type':'application/json'},body:JSON.stringify({model:(S.cfg.ttsModel||'tts-1'),input:text,voice:S.cfg.ttsVoice})});
       if(!res.ok)throw new Error('TTS Error '+res.status);
       const blob=await res.blob();audioData=await blobToB64(blob);
     }
