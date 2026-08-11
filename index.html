@@ -1216,7 +1216,7 @@ async function toggleTTS(msgId){
     const text = msg.content.replace(/\*[\s\S]*?\*/g, '').replace(/\s+/g, ' ').trim();
     let audioData=null;
     
-    if(S.cfg.ttsBase.includes('fish.audio')) {
+    if(S.cfg.ttsBase.includes('fish.audio') || S.cfg.ttsBase.includes('127.0.0.1') || S.cfg.ttsBase.includes('localhost')) {
       // 👉 Fish Audio 专属格式
       const url=S.cfg.ttsBase.replace(/\/+$/,'')+'/tts';
       const res=await fetch(url,{
